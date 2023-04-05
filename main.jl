@@ -117,4 +117,5 @@ end
 
 @time p_init, p_update = main(32, 20, 10.0, 0.1, 10, 8)
 plots = vcat(p_init, p_update)
-plot(plots..., layout=(3, 3))
+plot_result = plot(plots..., layout=(3, 3))
+savefig(plot_result, "plot.png")
