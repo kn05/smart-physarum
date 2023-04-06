@@ -51,7 +51,7 @@ end
 
 function plot_world(g_node, g_edge, node, edge)
     coors = getfield.(node, 2)
-    p = scatter(getindex.(coors, 1), getindex.(coors, 2), markeralpha=getfield.(node, :p) / maximum(getfield.(node, :p)), markersize=1, markerstrokewidth=0, lengend=:none, aspect_ratio=1)
+    p = scatter(getindex.(coors, 1), getindex.(coors, 2), markeralpha=getfield.(node, :p) / maximum(getfield.(node, :p)), markersize=3, markerstrokewidth=0, lengend=:none, aspect_ratio=1)
     colortable = [:red, :blue]
     for e in g_edge
         x_src = node[e.src].x
@@ -63,59 +63,67 @@ function plot_world(g_node, g_edge, node, edge)
                 colortable[1]
             end
         end
-        plot!(p, [x_src[1], x_dst[1]], [x_src[2], x_dst[2]], legend=:none, aspect_ratio=1, linecolor=c, linewidth=edge[e.src, e.dst].D / 2)
+        plot!(p, [x_src[1], x_dst[1]], [x_src[2], x_dst[2]], legend=:none, aspect_ratio=1, linecolor=c, linewidth=edge[e.src, e.dst].D)
     end
     p
 end
 
-function update!(g_node, g_edge, node, edge, nx, ny, dt=0.1, time=10)
-    step = Int(time / dt)
-    for _ in 1:step
-        A = Array{Float64,2}(undef, length(node), length(node))
-        for (j, n) in enumerate(node)
-            t = 0
-            for i in 1:length(node)
-                if i != j
-                    A[i, j] = edge[i, j].D / edge[i, j].L
-                    t -= A[i, j]
-                end
+function update!(g_node, g_edge, node, edge, nx, ny, Q_inlet, dt)
+    A = Array{Float64,2}(undef, length(node), length(node))
+    for (j, n) in enumerate(node)
+        t = 0
+        for i in 1:length(node)
+            if i != j
+                A[i, j] = edge[i, j].D / edge[i, j].L
+                t -= A[i, j]
             end
-            A[j, j] = t
         end
+        A[j, j] = t
+    end
 
-        A[end, 1:end] = vcat(zeros(nx * ny - 1), 1)
-        B = vcat(-10, zeros(nx * ny - 2), 0)
-        P = A \ B
-        setfield!.(node, :p, P)
+    A[end, 1:end] = vcat(zeros(nx * ny - 1), 1)
+    B = vcat(Q_inlet, zeros(nx * ny - 2), 0)
+    P = A \ B
+    setfield!.(node, :p, P)
 
-        for e in g_edge
-            e1 = @view edge[e.src, e.dst]
-            e2 = @view edge[e.dst, e.src]
-            e1[1].Q = e1[1].D / e1[1].L * (node[e.src].p - node[e.dst].p)
-            e2[1].Q = e2[1].D / e2[1].L * (node[e.dst].p - node[e.src].p)
-        end
+    for e in g_edge
+        e1 = @view edge[e.src, e.dst]
+        e2 = @view edge[e.dst, e.src]
+        e1[1].Q = e1[1].D / e1[1].L * (node[e.src].p - node[e.dst].p)
+        e2[1].Q = e2[1].D / e2[1].L * (node[e.dst].p - node[e.src].p)
+    end
 
-        for e in g_edge
-            e1 = @view edge[e.src, e.dst]
-            e2 = @view edge[e.dst, e.src]
-            e1[1].D += (abs(e1[1].Q) - e1[1].a * e1[1].D) * dt
-            e2[1].D += (abs(e2[1].Q) - e2[1].a * e2[1].D) * dt
-        end
+    for e in g_edge
+        e1 = @view edge[e.src, e.dst]
+        e2 = @view edge[e.dst, e.src]
+        e1[1].D += (abs(e1[1].Q) - e1[1].a * e1[1].D) * dt
+        e2[1].D += (abs(e2[1].Q) - e2[1].a * e2[1].D) * dt
     end
 end
 
-function main(nx, ny, bound, dt, time, n)
+function main(nx, ny, bound, n, dt, snap)
     g_node, g_edge, node, edge = init(nx, ny, bound, 0.2)
+    g_node′, g_edge′, node′, edge′ = deepcopy(g_node), deepcopy(g_edge), deepcopy(node), deepcopy(edge)
     p_init = plot_world(g_node, g_edge, node, edge)
+    p_init′ = plot_world(g_node′, g_edge′, node′, edge′)
     p_update = []
-    for _ in 1:n
-        update!(g_node, g_edge, node, edge, nx, ny, dt, time)
+    p_update′ = []
+    for t in 1:n
+        for _ in 1:Int(1 / dt)
+            update!(g_node, g_edge, node, edge, nx, ny, -10 - 5 * sin(2 * pi * t / n), dt)
+            update!(g_node′, g_edge′, node′, edge′, nx, ny, -10, dt)
+        end
         push!(p_update, plot_world(g_node, g_edge, node, edge))
+        push!(p_update′, plot_world(g_node′, g_edge′, node′, edge′))
     end
-    p_init, p_update
+    p_init, p_update, p_init′, p_update′
 end
 
-@time p_init, p_update = main(32, 20, 10.0, 0.1, 10, 8)
+@time p_init, p_update, p_init′, p_update′ = main(40, 30, 10.0, 15, 0.2, 1)
 plots = vcat(p_init, p_update)
-plot_result = plot(plots..., layout=(3, 3))
-savefig(plot_result, "plot.png")
+plots′ = vcat(p_init′, p_update′)
+plot_result = plot(plots..., layout=(4, 4), size=(2400, 1600))
+plot_result′ = plot(plots′..., layout=(4, 4), size=(2400, 1600))
+savefig(plot_result, "plot_sin_16_0_2.png")
+savefig(plot_result′, "plot_flat_16_0_2.png")
+plot(plots[end], plots′[end])
